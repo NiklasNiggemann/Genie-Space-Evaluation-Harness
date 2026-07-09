@@ -18,143 +18,21 @@ This harness implements the *evaluation* leg of the [Data Flywheel](https://www.
 
 | Capability | Description |
 |---|---|
-| **API-driven question execution** | Programmatically submits natural-language questions to a Genie Space via the Conversation API |
-| **Result comparison against ground truth** | Compares generated SQL and query results to expected answers |
-| **MLflow-based scoring** | Uses an LLM judge to assess *semantic* SQL correctness (not just exact-match) |
-| **Data Flywheel iteration tracking** | Measures improvement over time as instructions and examples are refined |
+| **API-driven question execution** | Submits questions to a Genie Space via the Conversation API |
+| **Ground truth comparison** | Compares generated SQL and results to expected answers |
+| **MLflow-based scoring** | LLM judge assesses *semantic* SQL correctness (not just exact-match) |
+| **Data Flywheel iteration tracking** | Measures improvement over time as instructions are refined |
 
 ---
 
-## Architecture Overview
+## Quick Start
 
-```
-┌──────────────────┐        ┌─────────────────┐        ┌──────────────────┐
-│  Test Suite      │───────▶│  Genie Space    │───────▶│  Result          │
-│  (test_cases[])  │  ask   │  (Conversation  │  poll  │  Collection      │
-│                  │        │   API)          │        │  (eval_records)  │
-└──────────────────┘        └─────────────────┘        └────────┬─────────┘
-                                                                │
-                                                                ▼
-                                                       ┌──────────────────┐
-                                                       │  LLM Judge       │
-                                                       │  (MLflow +       │
-                                                       │   Claude Sonnet) │
-                                                       └────────┬─────────┘
-                                                                │
-                                                                ▼
-                                                       ┌──────────────────┐
-                                                       │  MLflow          │
-                                                       │  Experiment      │
-                                                       │  (tracking)      │
-                                                       └──────────────────┘
-```
+1. Set `SPACE_ID` in the **Configuration** cell
+2. Replace `test_cases` with questions for your data model
+3. Set `EXPERIMENT_NAME` to your MLflow experiment path
+4. Run all cells sequentially
 
----
-
-## Notebook Structure
-
-| # | Cell | Purpose |
-|---|------|----------|
-| 1 | **Install Dependencies** | Installs `mlflow` and restarts the Python kernel |
-| 2 | **Setup & Imports** | Imports SDK, MLflow, pandas; initializes `WorkspaceClient` |
-| 3 | **Configuration** | Sets the Genie Space ID, polling parameters, and MLflow experiment path |
-| 4 | **Genie API Helpers** | Core functions: `ask_genie()`, `extract_sql()`, `extract_result()`, `extract_text_response()` |
-| 5 | **Test Suite Definition** | Benchmark test cases with expected SQL and result assertions |
-| 6 | **Run Evaluation** | Main loop — submits each question, collects responses, builds `eval_results` DataFrame |
-| 7 | **MLflow Scoring** | Custom LLM judge evaluates semantic SQL equivalence; logs results to MLflow |
-| 8 | **Results Summary** | Aggregates metrics by category/difficulty, prints recommendations |
-| 9 | **Data Flywheel — Next Steps** | Documents the iterative improvement process |
-
----
-
-## How the Evaluation Works
-
-### 1. Question Submission
-
-Each test case is submitted via the REST API:
-
-```
-POST /api/2.0/genie/spaces/{space_id}/start-conversation
-```
-
-The harness polls the message endpoint until a terminal status is reached (`COMPLETED`, `FAILED`, `CANCELLED`, or timeout after 3 minutes).
-
-### 2. Scoring
-
-Two scoring mechanisms:
-
-1. **Exact result matching** — checks if `expected_result_contains` value appears in the output
-2. **Semantic SQL judge** — an LLM (Claude Sonnet via Databricks Foundation Models) evaluates whether the generated SQL is *semantically equivalent* to the expected SQL
-
-### 3. MLflow Tracking
-
-All evaluation runs are logged to an MLflow experiment, enabling time-series comparison of accuracy across iterations.
-
----
-
-## Test Case Format
-
-```python
-{
-    "question": "How many transactions were paid with Visa?",
-    "expected_sql": """
-        SELECT COUNT(*) AS visa_transactions
-        FROM samples.bakehouse.sales_transactions
-        WHERE paymentMethod = 'visa'
-    """,
-    "expected_result_contains": "1083",
-    "category": "filter",
-    "difficulty": "easy"
-}
-```
-
-Categories: `aggregation`, `filter`, `join`, `time_filter`, `ambiguous`
-
----
-
-## Configuration
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `SPACE_ID` | Your Genie Space ID (from the URL) | Bakehouse Analytics demo |
-| `POLL_INTERVAL_SECONDS` | Seconds between status polls | `3` |
-| `MAX_POLL_ATTEMPTS` | Max polls before timeout | `60` (= 3 min) |
-| `EXPERIMENT_NAME` | MLflow experiment path | `/Users/<you>/genie-eval-experiment` |
-
----
-
-## Prerequisites
-
-- **Databricks workspace** with access to Genie Spaces
-- **Compute**: Any cluster or serverless compute (no GPU required)
-- **Foundation Model**: Access to `databricks-claude-sonnet-4` (for the LLM judge)
-
----
-
-## The Data Flywheel — Continuous Improvement
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  1. EVALUATE    │ ──▶ │  2. IDENTIFY     │ ──▶ │  3. IMPROVE     │
-│  Run harness    │     │  Find patterns   │     │  Add instructions│
-│  Score results  │     │  in failures     │     │  & example SQL   │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-        ▲                                               │
-        │     ┌──────────────────┐                      │
-        └──── │  4. RE-EVALUATE  │ ◀────────────────────┘
-              │  Measure delta   │
-              │  Track in MLflow │
-              └──────────────────┘
-```
-
-### Improvement levers in the Genie Space:
-
-| Lever | When to use |
-|-------|-------------|
-| **Text instructions** | Genie misinterprets business jargon or applies wrong logic |
-| **Example SQL** | Genie picks wrong tables or uses wrong join patterns |
-| **Column configurations** | Genie can't filter correctly on categorical columns |
-| **Join specifications** | Genie doesn't know how tables relate |
+The default suite uses `samples.bakehouse` — available in every Databricks workspace, no setup required.
 
 ---
 
@@ -162,8 +40,6 @@ Categories: `aggregation`, `filter`, `join`, `time_filter`, `ambiguous`
 
 > A Genie Space without evaluation is a **hope-driven deployment**.
 > A Genie Space with a harness is an **engineering-driven deployment**.
-
-The Data Flywheel guarantees that every failure becomes a learning opportunity, accuracy is measured (not assumed), and stakeholders receive quantitative confidence metrics rather than just demos.
 
 ---
 
