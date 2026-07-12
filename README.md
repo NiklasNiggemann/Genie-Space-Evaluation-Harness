@@ -191,6 +191,8 @@ Before running, set these values in the **Configuration** cell:
 | **Example SQL** | Genie picks wrong tables or uses wrong join patterns |
 | **Column configurations** | Genie can't filter correctly on categorical columns |
 | **Join specifications** | Genie doesn't know how tables relate |
+| **Prompt matching** | Genie can't resolve user terms to actual column values (e.g., "Florida" → `FL`) |
+| **Trusted assets** | Business-critical metrics that must never be approximated — use verified SQL |
 
 ---
 
