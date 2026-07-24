@@ -4,6 +4,45 @@ A programmatic evaluation framework for testing the reliability of **Databricks 
 
 ---
 
+## Repository Structure
+
+This project has two layers — a **notebook** for rapid prototyping and a **Python library** for production:
+
+```
+.
+├── Genie Agent Evaluation Harness.py   ← Interactive notebook (start here)
+├── genie-ontology/                     ← Ontology-as-code (instructions, example SQL, joins)
+└── genie-evaluation/                   ← Production Python library
+    ├── src/genie_eval/                  ← Tested, typed, versioned core logic
+    ├── tests/                           ← pytest suite (16 tests)
+    ├── test_suites/                     ← YAML-based test case definitions
+    ├── notebooks/run_evaluation.py      ← Thin orchestration notebook (~30 lines)
+    ├── databricks.yml                   ← Declarative Automation Bundle config
+    └── pyproject.toml                   ← Package metadata & dependencies
+```
+
+### The Notebook (Starting Point)
+
+The notebook (`Genie Agent Evaluation Harness.py`) is a self-contained prototype that proves the approach. Run it interactively to understand the evaluation mechanics, experiment with test cases, and iterate on your Genie Ontology. It requires no setup beyond a Databricks workspace and access to a Genie Agent.
+
+### The Library (Production)
+
+The `genie-evaluation/` directory extracts the same logic into a proper Python package — testable, code-reviewed, and deployable via CI/CD. The notebook becomes a thin orchestration layer that imports from `genie_eval`:
+
+```python
+from genie_eval import EvaluationRunner, load_test_suite
+
+suite = load_test_suite("test_suites/bakehouse_suite.yaml")
+runner = EvaluationRunner(space_id="your-agent-id")
+results = runner.run(suite)
+
+assert results.accuracy >= 0.75, "Quality gate failed"
+```
+
+See [`genie-evaluation/README.md`](genie-evaluation/README.md) for installation, deployment, and configuration details.
+
+---
+
 ## Motivation
 
 When deploying an AI-powered data assistant, the central engineering challenge is **guaranteeing reliability**. A chatbot that occasionally produces wrong answers erodes trust faster than having no chatbot at all.
