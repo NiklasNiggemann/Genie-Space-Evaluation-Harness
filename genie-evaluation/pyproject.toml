@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "genie-eval"
+version = "0.1.0"
+description = "Evaluation harness for Databricks Genie Agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    { name = "Niklas Niggemann", email = "niklas.niggemann@codecentric.de" },
+]
+
+dependencies = [
+    "databricks-sdk>=0.30.0",
+    "mlflow>=2.15.0",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.5.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/genie_eval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]

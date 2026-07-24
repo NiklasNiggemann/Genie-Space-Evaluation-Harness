@@ -1,0 +1,39 @@
+# Declarative Automation Bundle (DAB) for Genie Agent Evaluation
+# Deploy with: databricks bundle deploy --target dev
+
+bundle:
+  name: genie-evaluation
+
+variables:
+  cluster_id:
+    description: "Cluster ID for running evaluation jobs"
+    default: ""
+
+resources:
+  jobs:
+    genie_eval_nightly:
+      name: "Genie Agent Eval — Nightly Regression"
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"  # Daily at 06:00 UTC
+        timezone_id: "Europe/Berlin"
+      tasks:
+        - task_key: run_eval
+          notebook_task:
+            notebook_path: notebooks/run_evaluation.py
+            base_parameters:
+              space_id: "01f16364ce181c628265e3815d9214cc"
+              accuracy_threshold: "0.75"
+              test_suite: "test_suites/bakehouse_suite.yaml"
+          existing_cluster_id: ${var.cluster_id}
+      email_notifications:
+        on_failure:
+          - niklas.niggemann@codecentric.de
+
+targets:
+  dev:
+    default: true
+    workspace:
+      host: https://adb-4435273560031080.0.azuredatabricks.net
+  prod:
+    workspace:
+      host: https://adb-4435273560031080.0.azuredatabricks.net

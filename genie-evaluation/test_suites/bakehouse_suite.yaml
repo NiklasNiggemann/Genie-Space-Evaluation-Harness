@@ -1,0 +1,84 @@
+# Bakehouse Analytics — Evaluation Test Suite
+# =============================================
+# Test cases for the Genie Agent over samples.bakehouse dataset.
+# Each entry defines a question, the expected ground-truth SQL,
+# and metadata for categorization and filtering.
+
+- question: "What is the total revenue across all transactions?"
+  expected_sql: |
+    SELECT SUM(totalPrice) AS total_revenue
+    FROM samples.bakehouse.sales_transactions
+  category: aggregation
+  difficulty: easy
+
+- question: "How many transactions were paid with Visa?"
+  expected_sql: |
+    SELECT COUNT(*) AS visa_transactions
+    FROM samples.bakehouse.sales_transactions
+    WHERE paymentMethod = 'visa'
+  category: filter
+  difficulty: easy
+  expected_result_contains: "1083"
+
+- question: "What is the total revenue per product?"
+  expected_sql: |
+    SELECT product, SUM(totalPrice) AS revenue
+    FROM samples.bakehouse.sales_transactions
+    GROUP BY product
+    ORDER BY revenue DESC
+  category: aggregation
+  difficulty: easy
+
+- question: "Show me total sales per franchise in Japan"
+  expected_sql: |
+    SELECT f.name, SUM(t.totalPrice) AS total_sales
+    FROM samples.bakehouse.sales_transactions t
+    JOIN samples.bakehouse.sales_franchises f ON t.franchiseID = f.franchiseID
+    WHERE f.country = 'Japan'
+    GROUP BY f.name
+    ORDER BY total_sales DESC
+  category: join
+  difficulty: medium
+
+- question: "Which customers from Australia have spent the most in total?"
+  expected_sql: |
+    SELECT c.first_name, c.last_name, SUM(t.totalPrice) AS total_spent
+    FROM samples.bakehouse.sales_transactions t
+    JOIN samples.bakehouse.sales_customers c ON t.customerID = c.customerID
+    WHERE c.country = 'Australia'
+    GROUP BY c.first_name, c.last_name
+    ORDER BY total_spent DESC
+  category: join
+  difficulty: medium
+
+- question: "What were the total sales in May 2024?"
+  expected_sql: |
+    SELECT SUM(totalPrice) AS may_sales
+    FROM samples.bakehouse.sales_transactions
+    WHERE dateTime >= '2024-05-01' AND dateTime < '2024-06-01'
+  category: time_filter
+  difficulty: medium
+
+- question: "What's the most popular product?"
+  expected_sql: |
+    SELECT product, COUNT(*) AS transaction_count
+    FROM samples.bakehouse.sales_transactions
+    GROUP BY product
+    ORDER BY transaction_count DESC
+    LIMIT 1
+  category: ambiguous
+  difficulty: medium
+  expected_result_contains: "Golden Gate Ginger"
+
+- question: "Which supplier provides ingredients to the franchise with the highest revenue?"
+  expected_sql: |
+    SELECT s.name AS supplier_name, s.ingredient,
+           f.name AS franchise_name, SUM(t.totalPrice) AS franchise_revenue
+    FROM samples.bakehouse.sales_transactions t
+    JOIN samples.bakehouse.sales_franchises f ON t.franchiseID = f.franchiseID
+    JOIN samples.bakehouse.sales_suppliers s ON f.supplierID = s.supplierID
+    GROUP BY s.name, s.ingredient, f.name
+    ORDER BY franchise_revenue DESC
+    LIMIT 1
+  category: join
+  difficulty: hard
