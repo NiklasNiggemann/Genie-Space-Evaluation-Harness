@@ -14,7 +14,7 @@ This project has two layers — a **notebook** for rapid prototyping and a **Pyt
 ├── genie-ontology/                     ← Ontology-as-code (instructions, example SQL, joins)
 └── genie-evaluation/                   ← Production Python library
     ├── src/genie_eval/                  ← Tested, typed, versioned core logic
-    ├── tests/                           ← pytest suite (16 tests)
+    ├── tests/                           ← pytest suite (29 tests)
     ├── test_suites/                     ← YAML-based test case definitions
     ├── notebooks/run_evaluation.py      ← Thin orchestration notebook (~30 lines)
     ├── databricks.yml                   ← Declarative Automation Bundle config

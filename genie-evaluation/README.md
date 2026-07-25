@@ -48,8 +48,9 @@ genie-evaluation/
 │   └── runner.py             # Evaluation loop orchestration
 ├── tests/                    # Unit tests (pytest)
 │   ├── conftest.py           # Shared fixtures
-│   ├── test_api.py           # Tests for extraction functions
-│   └── test_judge.py         # Judge prompt regression tests
+│   ├── test_api.py           # Tests for extraction functions and ask_genie
+│   ├── test_judge.py         # Judge prompt regression tests
+│   └── test_runner.py        # EvalSuiteResults and verdict merge tests
 ├── notebooks/
 │   └── run_evaluation.py     # Thin orchestration notebook (scheduled)
 ├── test_suites/
