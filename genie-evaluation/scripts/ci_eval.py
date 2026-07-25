@@ -27,6 +27,8 @@ import os
 import sys
 from pathlib import Path
 
+import mlflow
+
 from genie_eval import EvaluationRunner, load_test_suite
 
 SCRIPTS_DIR = Path(__file__).parent
@@ -41,6 +43,16 @@ MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "4"))
 
 golden_path = os.environ.get("GOLDEN_SUITE_PATH", str(SUITES_DIR / "golden_suite.yaml"))
 suite_path = os.environ.get("TEST_SUITE_PATH", str(SUITES_DIR / "bakehouse_suite.yaml"))
+
+# Fail fast: verify MLflow is reachable and the experiment is writable before
+# spending time on Genie API calls. mlflow.set_experiment() creates the experiment
+# if it doesn't exist; it raises if the host or credentials are wrong.
+try:
+    mlflow.set_experiment(EXPERIMENT)
+except Exception as e:
+    print(f"❌ Cannot reach MLflow experiment '{EXPERIMENT}': {e}")
+    print("Check DATABRICKS_HOST, DATABRICKS_TOKEN, and that the experiment path is writable.")
+    sys.exit(1)
 
 runner = EvaluationRunner(
     space_id=SPACE_ID,

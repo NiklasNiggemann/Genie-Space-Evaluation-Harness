@@ -5,7 +5,7 @@ that SQL, results, and text are correctly extracted from the Genie
 response structure.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call, patch
 
 from genie_eval.api import ask_genie, extract_result, extract_sql, extract_text_response
 
@@ -54,6 +54,37 @@ class TestAskGenie:
         client = self._mock_client({"status": "COMPLETED", "attachments": []})
         result = ask_genie("space-1", "test?", client=client, poll_interval=0)
         assert isinstance(result["elapsed_seconds"], float)
+
+    def test_retries_on_start_conversation_failure(self):
+        client = MagicMock()
+        ok_response = {"status": "COMPLETED", "attachments": []}
+        client.api_client.do.side_effect = [
+            ConnectionError("transient"),          # start-conversation fails once
+            {"conversation_id": "c", "message_id": "m"},  # retry succeeds
+            ok_response,                           # poll
+        ]
+        with patch("genie_eval.api.time.sleep"):
+            result = ask_genie("space-1", "q?", client=client, poll_interval=0, max_retries=2, retry_delay=0)
+        assert result["status"] == "COMPLETED"
+
+    def test_raises_after_all_retries_exhausted(self):
+        import pytest
+        client = MagicMock()
+        client.api_client.do.side_effect = ConnectionError("persistent failure")
+        with patch("genie_eval.api.time.sleep"), pytest.raises(ConnectionError):
+            ask_genie("space-1", "q?", client=client, poll_interval=0, max_retries=2, retry_delay=0)
+
+    def test_retries_on_poll_failure(self):
+        client = MagicMock()
+        ok_poll = {"status": "COMPLETED", "attachments": []}
+        client.api_client.do.side_effect = [
+            {"conversation_id": "c", "message_id": "m"},  # start-conversation
+            ConnectionError("transient poll failure"),      # first poll fails
+            ok_poll,                                       # retry succeeds
+        ]
+        with patch("genie_eval.api.time.sleep"):
+            result = ask_genie("space-1", "q?", client=client, poll_interval=0, max_retries=2, retry_delay=0)
+        assert result["status"] == "COMPLETED"
 
 
 class TestExtractSql:

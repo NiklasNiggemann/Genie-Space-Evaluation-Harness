@@ -8,57 +8,74 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Workspace/Users/niklas.niggemann@codecentric.de/Genie Evaluation Harness/genie-evaluation -q
+# Update this path to wherever the package lives in your workspace
+# MAGIC %pip install /Workspace/Users/niklas.niggemann@codecentric.de/genie-evaluation -q
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
 
 from genie_eval import EvaluationRunner, load_test_suite
 
-# Configuration — override via job parameters (dbutils.widgets)
-try:
-    SPACE_ID = dbutils.widgets.get("space_id")
-    ACCURACY_THRESHOLD = float(dbutils.widgets.get("accuracy_threshold"))
-    TEST_SUITE_PATH = dbutils.widgets.get("test_suite")
-except Exception:
-    # Defaults for interactive use
-    SPACE_ID = "01f16364ce181c628265e3815d9214cc"
-    ACCURACY_THRESHOLD = 0.75
-    TEST_SUITE_PATH = "test_suites/bakehouse_suite.yaml"
+# Job parameters — set defaults here, override via Lakeflow job parameters
+dbutils.widgets.text("space_id",           "01f16364ce181c628265e3815d9214cc")
+dbutils.widgets.text("accuracy_threshold", "0.75")
+dbutils.widgets.text("test_suite",         "test_suites/bakehouse_suite.yaml")
+dbutils.widgets.text("golden_suite",       "test_suites/golden_suite.yaml")
+dbutils.widgets.text("max_workers",        "4")
+dbutils.widgets.text("warehouse_id",       "")
 
-print(f"Space ID: {SPACE_ID}")
-print(f"Accuracy threshold: {ACCURACY_THRESHOLD:.0%}")
-print(f"Test suite: {TEST_SUITE_PATH}")
+SPACE_ID           = dbutils.widgets.get("space_id")
+ACCURACY_THRESHOLD = float(dbutils.widgets.get("accuracy_threshold"))
+TEST_SUITE_PATH    = dbutils.widgets.get("test_suite")
+GOLDEN_SUITE_PATH  = dbutils.widgets.get("golden_suite")
+MAX_WORKERS        = int(dbutils.widgets.get("max_workers"))
+WAREHOUSE_ID       = dbutils.widgets.get("warehouse_id") or None
+
+print(f"Space ID:          {SPACE_ID}")
+print(f"Accuracy threshold:{ACCURACY_THRESHOLD:.0%}")
+print(f"Test suite:        {TEST_SUITE_PATH}")
+print(f"Max workers:       {MAX_WORKERS}")
 
 # COMMAND ----------
 
-# Load test cases from versioned YAML
-suite = load_test_suite(TEST_SUITE_PATH)
-print(f"Loaded {len(suite)} test cases")
-
-# COMMAND ----------
-
-# Run evaluation (includes Genie API calls + LLM judge + MLflow logging)
 runner = EvaluationRunner(
     space_id=SPACE_ID,
-    experiment_name="/Users/niklas.niggemann@codecentric.de/genie-eval-experiment",
+    experiment_name="/Shared/genie-eval",
+    max_workers=MAX_WORKERS,
+    warehouse_id=WAREHOUSE_ID,
 )
-results = runner.run(suite)
+
+# COMMAND ----------
+# MAGIC %md ### 1 — Golden suite (strict gate)
+
+golden_suite = load_test_suite(GOLDEN_SUITE_PATH)
+golden_results = runner.run(golden_suite)
+
+assert golden_results.accuracy >= 1.0, (
+    f"❌ Golden regression: {golden_results.accuracy:.0%} — one or more locked "
+    "questions failed. Fix the ontology or the golden suite before proceeding."
+)
+print(f"✅ Golden suite: {golden_results.accuracy:.0%} ({golden_results.total} questions)")
+
+# COMMAND ----------
+# MAGIC %md ### 2 — Full suite (quality gate)
+
+full_suite = load_test_suite(TEST_SUITE_PATH)
+results = runner.run(full_suite)
 
 # COMMAND ----------
 
-# Write to Delta for historical tracking
-# results.to_delta("catalog.schema.genie_eval_results")  # uncomment when target table exists
-
-print(f"\nAccuracy: {results.accuracy:.0%} ({results.completed}/{results.total} completed)")
+display(results.summary_by_category())
 
 # COMMAND ----------
 
-# Quality gate — fail the job if accuracy regressed
+# Uncomment to persist results to Delta for historical trend analysis
+# results.to_delta("catalog.schema.genie_eval_results")
+
+# COMMAND ----------
+
 assert results.accuracy >= ACCURACY_THRESHOLD, (
-    f"\u274c Accuracy {results.accuracy:.0%} is below threshold {ACCURACY_THRESHOLD:.0%}. "
-    f"Review failing questions and update the Genie Ontology."
+    f"❌ Accuracy {results.accuracy:.0%} is below threshold {ACCURACY_THRESHOLD:.0%}. "
+    "Review the failures above and update the Genie Ontology."
 )
-
-print(f"\u2705 Accuracy {results.accuracy:.0%} meets threshold {ACCURACY_THRESHOLD:.0%}")
-
+print(f"✅ Accuracy {results.accuracy:.0%} meets threshold {ACCURACY_THRESHOLD:.0%}")
