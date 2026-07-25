@@ -294,3 +294,74 @@ class EvaluationRunner:
             space_id=self.space_id,
             run_id=run.info.run_id,
         )
+
+
+class MultiSpaceRunner:
+    """Run the same evaluation suite against multiple Genie Spaces in parallel.
+
+    Useful for comparing dev vs prod, or A/B testing ontology changes before
+    promoting them. All spaces run concurrently; questions within each space
+    can also be parallelised via max_workers_per_space.
+
+    Usage:
+        runner = MultiSpaceRunner(
+            space_ids={"dev": "space-dev-id", "prod": "space-prod-id"},
+            max_workers_per_space=4,
+        )
+        results = runner.run(test_cases)
+        # results = {"dev": EvalSuiteResults, "prod": EvalSuiteResults}
+
+        from genie_eval import compare_spaces
+        df = compare_spaces(results)
+        assert results["dev"].accuracy >= results["prod"].accuracy, "Dev regressed vs prod"
+    """
+
+    def __init__(
+        self,
+        space_ids: dict[str, str],
+        *,
+        client: WorkspaceClient | None = None,
+        experiment_name: str | None = None,
+        judge_model: str | None = None,
+        accuracy_threshold: float = 0.75,
+        max_workers_per_space: int = 1,
+        warehouse_id: str | None = None,
+        verbose: bool = True,
+    ):
+        self.space_ids = space_ids
+        self._runner_kwargs: dict = {
+            "client": client,
+            "experiment_name": experiment_name,
+            "judge_model": judge_model,
+            "accuracy_threshold": accuracy_threshold,
+            "max_workers": max_workers_per_space,
+            "warehouse_id": warehouse_id,
+            "verbose": verbose,
+        }
+
+    def run(
+        self,
+        test_cases: list[TestCase],
+        *,
+        categories: list[str] | None = None,
+        difficulties: list[str] | None = None,
+    ) -> dict[str, EvalSuiteResults]:
+        """Run the same test suite against all spaces in parallel.
+
+        Args:
+            test_cases: Test cases to run against every space.
+            categories: Optional category filter applied to all spaces.
+            difficulties: Optional difficulty filter applied to all spaces.
+
+        Returns:
+            Dict mapping space name → EvalSuiteResults.
+        """
+        def _run_one(item: tuple[str, str]) -> tuple[str, EvalSuiteResults]:
+            name, space_id = item
+            runner = EvaluationRunner(space_id=space_id, **self._runner_kwargs)
+            return name, runner.run(test_cases, categories=categories, difficulties=difficulties)
+
+        with ThreadPoolExecutor(max_workers=len(self.space_ids)) as executor:
+            pairs = list(executor.map(_run_one, self.space_ids.items()))
+
+        return dict(pairs)

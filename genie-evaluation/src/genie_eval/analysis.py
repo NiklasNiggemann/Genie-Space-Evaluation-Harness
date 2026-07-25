@@ -79,6 +79,33 @@ def compare_result_sets(rows_a: list[dict], rows_b: list[dict]) -> bool:
     return sorted(row_signature(r) for r in rows_a) == sorted(row_signature(r) for r in rows_b)
 
 
+def compare_spaces(results: dict[str, "EvalSuiteResults"]) -> pd.DataFrame:
+    """Summarise accuracy across multiple Genie Spaces from a MultiSpaceRunner run.
+
+    Args:
+        results: Dict mapping space name → EvalSuiteResults, as returned by
+                 MultiSpaceRunner.run().
+
+    Returns:
+        DataFrame with one row per space, sorted by accuracy descending:
+            name, space_id, accuracy, completion_rate, total
+    """
+    return (
+        pd.DataFrame([
+            {
+                "name": name,
+                "space_id": suite.space_id,
+                "accuracy": suite.accuracy,
+                "completion_rate": suite.completion_rate,
+                "total": suite.total,
+            }
+            for name, suite in results.items()
+        ])
+        .sort_values("accuracy", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
 # ---- Run-over-run diff --------------------------------------------------- #
 
 def compare_runs(run_id_a: str, run_id_b: str) -> pd.DataFrame:

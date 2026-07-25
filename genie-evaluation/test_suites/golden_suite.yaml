@@ -1,0 +1,33 @@
+# Golden test suite — locked subset for regression detection.
+#
+# These questions are carefully chosen to be unambiguous and reliably answered
+# by a correctly configured Genie Agent. The CI pipeline requires ALL golden
+# cases to pass (threshold: 100%).
+#
+# Modify this file only via a deliberate, reviewed PR — never during an active
+# iteration on the ontology.
+
+- question: "What is the total revenue across all transactions?"
+  expected_sql: |
+    SELECT SUM(totalPrice) AS total_revenue
+    FROM samples.bakehouse.sales_transactions
+  category: aggregation
+  difficulty: easy
+
+- question: "How many transactions were paid with Visa?"
+  expected_sql: |
+    SELECT COUNT(*) AS visa_transactions
+    FROM samples.bakehouse.sales_transactions
+    WHERE paymentMethod = 'visa'
+  category: filter
+  difficulty: easy
+  expected_result_contains: "1083"
+
+- question: "What is the total revenue per product?"
+  expected_sql: |
+    SELECT product, SUM(totalPrice) AS revenue
+    FROM samples.bakehouse.sales_transactions
+    GROUP BY product
+    ORDER BY revenue DESC
+  category: aggregation
+  difficulty: easy
