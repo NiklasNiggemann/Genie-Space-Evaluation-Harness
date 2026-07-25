@@ -363,3 +363,315 @@ class TestCompareRuns:
         with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
             result = compare_runs("run-a", "run-b")
         assert list(result.columns) == ["question", "category", "difficulty", "judge_correct_a", "judge_correct_b", "change"]
+
+    def test_question_only_in_a_excluded(self):
+        from genie_eval.analysis import compare_runs
+        df_a = self._make_df([("Shared?", "agg", "easy", True), ("Only in A?", "agg", "easy", True)])
+        df_b = self._make_df([("Shared?", "agg", "easy", True)])
+        with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
+            result = compare_runs("run-a", "run-b")
+        assert len(result) == 1
+        assert result.iloc[0]["question"] == "Shared?"
+
+    def test_question_only_in_b_excluded(self):
+        from genie_eval.analysis import compare_runs
+        df_a = self._make_df([("Shared?", "agg", "easy", True)])
+        df_b = self._make_df([("Shared?", "agg", "easy", True), ("Only in B?", "agg", "easy", False)])
+        with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
+            result = compare_runs("run-a", "run-b")
+        assert len(result) == 1
+        assert result.iloc[0]["question"] == "Shared?"
+
+    def test_no_shared_questions_returns_empty(self):
+        from genie_eval.analysis import compare_runs
+        df_a = self._make_df([("Question A?", "agg", "easy", True)])
+        df_b = self._make_df([("Question B?", "agg", "easy", True)])
+        with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
+            result = compare_runs("run-a", "run-b")
+        assert len(result) == 0
+
+
+# ---- MultiSpaceRunner ----------------------------------------------------- #
+
+class TestMultiSpaceRunner:
+    def _fake_ask(self, space_id, question, *, client, **kwargs):
+        return {
+            "status": "COMPLETED",
+            "message": {"attachments": [{"query": {"query": "SELECT 1"}}]},
+            "conversation_id": "c", "message_id": "m", "elapsed_seconds": 0.01,
+        }
+
+    def _make_multi(self, space_ids=None):
+        from genie_eval.runner import MultiSpaceRunner
+        if space_ids is None:
+            space_ids = {"dev": "space-dev", "prod": "space-prod"}
+        with patch("genie_eval.runner.WorkspaceClient"):
+            return MultiSpaceRunner(space_ids=space_ids, verbose=False)
+
+    def test_returns_result_for_each_space(self):
+        from genie_eval.models import TestCase, EvalSuiteResults
+        tc = TestCase(question="q", expected_sql="SELECT 1", category="c", difficulty="d")
+        runner = self._make_multi()
+        with patch("genie_eval.runner.WorkspaceClient"), \
+             patch("genie_eval.runner.ask_genie", side_effect=self._fake_ask), \
+             patch("genie_eval.runner.EvaluationRunner._run_judge",
+                   side_effect=lambda r: EvalSuiteResults(results=r)):
+            results = runner.run([tc])
+        assert set(results.keys()) == {"dev", "prod"}
+        assert all(isinstance(v, EvalSuiteResults) for v in results.values())
+
+    def test_each_space_evaluates_all_questions(self):
+        from genie_eval.models import TestCase, EvalSuiteResults
+        cases = [
+            TestCase(question=f"q{i}", expected_sql="SELECT 1", category="c", difficulty="d")
+            for i in range(3)
+        ]
+        runner = self._make_multi()
+        with patch("genie_eval.runner.WorkspaceClient"), \
+             patch("genie_eval.runner.ask_genie", side_effect=self._fake_ask), \
+             patch("genie_eval.runner.EvaluationRunner._run_judge",
+                   side_effect=lambda r: EvalSuiteResults(results=r)):
+            results = runner.run(cases)
+        for suite in results.values():
+            assert suite.total == 3
+
+    def test_category_filter_applied_to_all_spaces(self):
+        from genie_eval.models import TestCase, EvalSuiteResults
+        cases = [
+            TestCase(question="join q", expected_sql="SELECT 1", category="join", difficulty="d"),
+            TestCase(question="agg q", expected_sql="SELECT 1", category="aggregation", difficulty="d"),
+        ]
+        runner = self._make_multi()
+        with patch("genie_eval.runner.WorkspaceClient"), \
+             patch("genie_eval.runner.ask_genie", side_effect=self._fake_ask), \
+             patch("genie_eval.runner.EvaluationRunner._run_judge",
+                   side_effect=lambda r: EvalSuiteResults(results=r)):
+            results = runner.run(cases, categories=["join"])
+        for suite in results.values():
+            assert suite.total == 1
+            assert suite.results[0].category == "join"
+
+
+class TestCompareSpaces:
+    def test_returns_one_row_per_space(self):
+        from genie_eval.analysis import compare_spaces
+        results = {
+            "dev": EvalSuiteResults(results=[_result(True), _result(True)], space_id="space-dev"),
+            "prod": EvalSuiteResults(results=[_result(True), _result(False)], space_id="space-prod"),
+        }
+        df = compare_spaces(results)
+        assert len(df) == 2
+        assert set(df["name"]) == {"dev", "prod"}
+
+    def test_sorted_by_accuracy_descending(self):
+        from genie_eval.analysis import compare_spaces
+        results = {
+            "dev":  EvalSuiteResults(results=[_result(True)],  space_id="d"),
+            "prod": EvalSuiteResults(results=[_result(False)], space_id="p"),
+        }
+        df = compare_spaces(results)
+        assert df.iloc[0]["name"] == "dev"
+        assert df.iloc[1]["name"] == "prod"
+
+    def test_output_columns(self):
+        from genie_eval.analysis import compare_spaces
+        results = {"a": EvalSuiteResults(results=[_result(True)], space_id="s")}
+        df = compare_spaces(results)
+        assert set(df.columns) == {"name", "space_id", "accuracy", "completion_rate", "total"}
+
+    def test_accuracy_values_correct(self):
+        from genie_eval.analysis import compare_spaces
+        results = {
+            "dev": EvalSuiteResults(results=[_result(True), _result(True), _result(False)], space_id="d"),
+        }
+        df = compare_spaces(results).set_index("name")
+        assert df.loc["dev", "accuracy"] == pytest.approx(2 / 3)
+
+
+# ---- load_test_suite ------------------------------------------------------ #
+
+class TestLoadTestSuite:
+    def _write(self, tmp_path, content):
+        p = tmp_path / "suite.yaml"
+        p.write_text(content)
+        return p
+
+    def test_loads_required_fields(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        p = self._write(tmp_path, """
+- question: "What is revenue?"
+  expected_sql: "SELECT SUM(price) FROM sales"
+  category: aggregation
+  difficulty: easy
+""")
+        cases = load_test_suite(p)
+        assert len(cases) == 1
+        assert cases[0].question == "What is revenue?"
+        assert cases[0].expected_sql == "SELECT SUM(price) FROM sales"
+        assert cases[0].category == "aggregation"
+        assert cases[0].difficulty == "easy"
+
+    def test_defaults_category_and_difficulty(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        p = self._write(tmp_path, """
+- question: "q?"
+  expected_sql: "SELECT 1"
+""")
+        cases = load_test_suite(p)
+        assert cases[0].category == "general"
+        assert cases[0].difficulty == "medium"
+
+    def test_expected_result_contains_populated(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        p = self._write(tmp_path, """
+- question: "q?"
+  expected_sql: "SELECT 1"
+  expected_result_contains: "42"
+""")
+        assert load_test_suite(p)[0].expected_result_contains == "42"
+
+    def test_expected_result_contains_null(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        p = self._write(tmp_path, """
+- question: "q?"
+  expected_sql: "SELECT 1"
+  expected_result_contains: null
+""")
+        assert load_test_suite(p)[0].expected_result_contains is None
+
+    def test_loads_multiple_cases(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        p = self._write(tmp_path, """
+- question: "q1?"
+  expected_sql: "SELECT 1"
+  category: agg
+  difficulty: easy
+- question: "q2?"
+  expected_sql: "SELECT 2"
+  category: join
+  difficulty: hard
+""")
+        cases = load_test_suite(p)
+        assert len(cases) == 2
+        assert cases[1].question == "q2?"
+        assert cases[1].category == "join"
+
+    def test_empty_yaml_returns_empty_list(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        p = self._write(tmp_path, "[]")
+        assert load_test_suite(p) == []
+
+    def test_missing_file_raises(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        with pytest.raises(FileNotFoundError):
+            load_test_suite(tmp_path / "nonexistent.yaml")
+
+    def test_missing_question_field_raises(self, tmp_path):
+        from genie_eval.runner import load_test_suite
+        p = self._write(tmp_path, """
+- expected_sql: "SELECT 1"
+  category: agg
+""")
+        with pytest.raises(KeyError):
+            load_test_suite(p)
+
+
+# ---- _evaluate_single error path ----------------------------------------- #
+
+class TestEvaluateSingleErrorPath:
+    def test_exception_produces_error_result(self):
+        from genie_eval.models import TestCase
+        tc = TestCase(question="q?", expected_sql="SELECT 1", category="agg", difficulty="easy")
+        runner = _make_runner()
+        with patch("genie_eval.runner.ask_genie", side_effect=RuntimeError("connection timeout")):
+            result = runner._evaluate_single(1, 1, tc)
+        assert result.status == "ERROR"
+        assert result.question == "q?"
+        assert result.category == "agg"
+        assert result.difficulty == "easy"
+
+    def test_error_message_in_text_response(self):
+        from genie_eval.models import TestCase
+        tc = TestCase(question="q?", expected_sql="SELECT 1", category="c", difficulty="d")
+        runner = _make_runner()
+        with patch("genie_eval.runner.ask_genie", side_effect=ValueError("some error message")):
+            result = runner._evaluate_single(1, 1, tc)
+        assert "some error message" in result.text_response
+
+    def test_error_leaves_judge_correct_none(self):
+        from genie_eval.models import TestCase
+        tc = TestCase(question="q?", expected_sql="SELECT 1", category="c", difficulty="d")
+        runner = _make_runner()
+        with patch("genie_eval.runner.ask_genie", side_effect=RuntimeError("boom")):
+            result = runner._evaluate_single(1, 1, tc)
+        assert result.judge_correct is None
+
+    def test_error_leaves_result_set_correct_none_even_with_warehouse(self):
+        from genie_eval.models import TestCase
+        tc = TestCase(question="q?", expected_sql="SELECT 1", category="c", difficulty="d")
+        runner = _make_runner(warehouse_id="wh-123")
+        with patch("genie_eval.runner.ask_genie", side_effect=RuntimeError("boom")), \
+             patch("genie_eval.runner.execute_sql") as mock_exec:
+            result = runner._evaluate_single(1, 1, tc)
+        mock_exec.assert_not_called()
+        assert result.result_set_correct is None
+
+
+# ---- execute_sql ---------------------------------------------------------- #
+
+class TestExecuteSql:
+    def _mock_client(self, *, succeeded=True, columns=None, rows=None, error_message="failed"):
+        from databricks.sdk.service.sql import StatementState
+
+        client = MagicMock()
+        stmt = MagicMock()
+        stmt.status.state = StatementState.SUCCEEDED if succeeded else StatementState.FAILED
+
+        if succeeded and rows is not None:
+            stmt.result.data_array = rows
+            cols = []
+            for c in (columns or []):
+                col = MagicMock()
+                col.name = c
+                cols.append(col)
+            stmt.manifest.schema.columns = cols
+        else:
+            stmt.result.data_array = None
+            stmt.status.error.message = error_message
+
+        client.statement_execution.execute_statement.return_value = stmt
+        return client
+
+    def test_returns_rows_as_dicts(self):
+        from genie_eval.analysis import execute_sql
+        client = self._mock_client(columns=["col1", "col2"], rows=[["a", 1], ["b", 2]])
+        rows = execute_sql("SELECT 1", client=client, warehouse_id="wh")
+        assert rows == [{"col1": "a", "col2": 1}, {"col1": "b", "col2": 2}]
+
+    def test_empty_result_returns_empty_list(self):
+        from genie_eval.analysis import execute_sql
+        client = self._mock_client()
+        rows = execute_sql("SELECT 1", client=client, warehouse_id="wh")
+        assert rows == []
+
+    def test_failed_state_raises_runtime_error(self):
+        from genie_eval.analysis import execute_sql
+        client = self._mock_client(succeeded=False, error_message="syntax error near FROM")
+        with pytest.raises(RuntimeError, match="SQL execution failed"):
+            execute_sql("INVALID SQL", client=client, warehouse_id="wh")
+
+    def test_passes_warehouse_id_and_timeout(self):
+        from genie_eval.analysis import execute_sql
+        client = self._mock_client()
+        execute_sql("SELECT 1", client=client, warehouse_id="my-wh", timeout="60s")
+        client.statement_execution.execute_statement.assert_called_once_with(
+            warehouse_id="my-wh",
+            statement="SELECT 1",
+            wait_timeout="60s",
+        )
+
+    def test_column_names_mapped_correctly(self):
+        from genie_eval.analysis import execute_sql
+        client = self._mock_client(columns=["revenue", "region"], rows=[[999, "West"]])
+        rows = execute_sql("SELECT 1", client=client, warehouse_id="wh")
+        assert rows[0] == {"revenue": 999, "region": "West"}
