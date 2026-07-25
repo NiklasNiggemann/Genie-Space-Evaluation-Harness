@@ -5,7 +5,55 @@ that SQL, results, and text are correctly extracted from the Genie
 response structure.
 """
 
-from genie_eval.api import extract_result, extract_sql, extract_text_response
+from unittest.mock import MagicMock
+
+from genie_eval.api import ask_genie, extract_result, extract_sql, extract_text_response
+
+
+class TestAskGenie:
+    """Tests for ask_genie() — uses a mocked WorkspaceClient (no network)."""
+
+    def _mock_client(self, *poll_responses):
+        """Build a mock client where the first do() call is start-conversation
+        and subsequent calls are message poll responses."""
+        client = MagicMock()
+        client.api_client.do.side_effect = [
+            {"conversation_id": "conv-1", "message_id": "msg-1"},
+            *poll_responses,
+        ]
+        return client
+
+    def test_returns_completed_on_first_poll(self):
+        client = self._mock_client({"status": "COMPLETED", "attachments": []})
+        result = ask_genie("space-1", "What is revenue?", client=client, poll_interval=0)
+        assert result["status"] == "COMPLETED"
+        assert result["conversation_id"] == "conv-1"
+        assert result["message_id"] == "msg-1"
+
+    def test_polls_until_terminal(self):
+        client = self._mock_client(
+            {"status": "EXECUTING_QUERY"},
+            {"status": "EXECUTING_QUERY"},
+            {"status": "COMPLETED", "attachments": []},
+        )
+        result = ask_genie("space-1", "test?", client=client, poll_interval=0)
+        assert result["status"] == "COMPLETED"
+        assert client.api_client.do.call_count == 4  # 1 start + 3 polls
+
+    def test_returns_timeout_when_max_polls_exceeded(self):
+        client = self._mock_client(*[{"status": "EXECUTING_QUERY"}] * 3)
+        result = ask_genie("space-1", "test?", client=client, poll_interval=0, max_polls=3)
+        assert result["status"] == "TIMEOUT"
+
+    def test_returns_failed_status_as_terminal(self):
+        client = self._mock_client({"status": "FAILED"})
+        result = ask_genie("space-1", "bad query", client=client, poll_interval=0)
+        assert result["status"] == "FAILED"
+
+    def test_elapsed_seconds_is_float(self):
+        client = self._mock_client({"status": "COMPLETED", "attachments": []})
+        result = ask_genie("space-1", "test?", client=client, poll_interval=0)
+        assert isinstance(result["elapsed_seconds"], float)
 
 
 class TestExtractSql:

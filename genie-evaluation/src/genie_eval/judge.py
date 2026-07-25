@@ -7,8 +7,6 @@ the same result set regardless of syntactic differences.
 
 from __future__ import annotations
 
-from mlflow.genai import make_judge
-
 # ---- Judge Prompt ----
 # Versioned here so changes are reviewable and testable.
 
@@ -53,6 +51,8 @@ def create_sql_judge(
     Returns:
         An MLflow scorer object usable with `mlflow.genai.evaluate()`.
     """
+    from mlflow.genai import make_judge  # lazy — only available on Databricks
+
     return make_judge(
         name="sql_semantic_correctness",
         instructions=instructions,

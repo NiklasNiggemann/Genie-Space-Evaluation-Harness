@@ -137,13 +137,6 @@ def extract_result(message: dict[str, Any]) -> list:
             if "result" in query_info:
                 return query_info["result"]
 
-    # Check top-level query_result
-    if "query_result" in msg_data:
-        qr = msg_data["query_result"]
-        if isinstance(qr, dict) and "data" in qr:
-            return qr["data"]
-        return qr if isinstance(qr, list) else []
-
     return []
 
 

@@ -4,11 +4,25 @@ These are regression tests to ensure the judge prompt doesn't
 accidentally change in ways that break scoring consistency.
 """
 
+import sys
+import types
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
+
 from genie_eval.judge import (
     DEFAULT_JUDGE_MODEL,
     SQL_JUDGE_INSTRUCTIONS,
     create_sql_judge,
 )
+
+
+@contextmanager
+def _fake_mlflow_genai():
+    """Inject a fake mlflow.genai module so create_sql_judge can be called locally."""
+    fake_genai = types.ModuleType("mlflow.genai")
+    fake_genai.make_judge = MagicMock(return_value=MagicMock(name="scorer"))
+    with patch.dict(sys.modules, {"mlflow.genai": fake_genai}):
+        yield fake_genai
 
 
 class TestJudgePrompt:
@@ -38,11 +52,23 @@ class TestCreateSqlJudge:
     """Tests for judge creation (no LLM call)."""
 
     def test_creates_scorer_with_default_args(self):
-        judge = create_sql_judge()
-        # The returned object should be a callable scorer
+        with _fake_mlflow_genai() as genai:
+            judge = create_sql_judge()
         assert judge is not None
-        assert hasattr(judge, "name") or callable(judge)
+        genai.make_judge.assert_called_once_with(
+            name="sql_semantic_correctness",
+            instructions=SQL_JUDGE_INSTRUCTIONS,
+            model=DEFAULT_JUDGE_MODEL,
+            feedback_value_type=bool,
+        )
 
     def test_creates_scorer_with_custom_model(self):
-        judge = create_sql_judge(model="databricks:/databricks-meta-llama-3-3-70b-instruct")
-        assert judge is not None
+        custom_model = "databricks:/databricks-meta-llama-3-3-70b-instruct"
+        with _fake_mlflow_genai() as genai:
+            create_sql_judge(model=custom_model)
+        genai.make_judge.assert_called_once_with(
+            name="sql_semantic_correctness",
+            instructions=SQL_JUDGE_INSTRUCTIONS,
+            model=custom_model,
+            feedback_value_type=bool,
+        )

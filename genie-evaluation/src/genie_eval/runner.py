@@ -7,6 +7,7 @@ and assembling EvalSuiteResults for downstream reporting/storage.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,8 +17,10 @@ import pandas as pd
 from databricks.sdk import WorkspaceClient
 
 from .api import ask_genie, extract_result, extract_sql, extract_text_response
-from .judge import create_sql_judge
+from .judge import DEFAULT_JUDGE_MODEL, create_sql_judge
 from .models import EvalResult, EvalSuiteResults, TestCase
+
+logger = logging.getLogger(__name__)
 
 
 def load_test_suite(path: str | Path) -> list[TestCase]:
@@ -146,6 +149,7 @@ class EvaluationRunner:
                         print(f"       \u2717 {status} after {elapsed}s")
 
             except Exception as e:
+                logger.debug("Exception evaluating test case %r", tc.question, exc_info=True)
                 record = EvalResult(
                     question=tc.question,
                     category=tc.category,
@@ -160,7 +164,6 @@ class EvaluationRunner:
 
         # ---- Phase 2: LLM Judge Scoring ----
         suite_results = self._run_judge(eval_results)
-        suite_results.space_id = self.space_id
 
         if self.verbose:
             print(f"\n{'='*70}")
@@ -178,15 +181,15 @@ class EvaluationRunner:
 
         if not judgeable:
             # No SQL pairs to judge — mark all as None
-            return EvalSuiteResults(results=eval_results)
+            return EvalSuiteResults(results=eval_results, space_id=self.space_id)
 
         judge = create_sql_judge(
-            model=self.judge_model or "databricks:/databricks-claude-sonnet-4"
+            model=self.judge_model or DEFAULT_JUDGE_MODEL
         )
 
         eval_data = pd.DataFrame(
             {
-                "inputs": [{"question": r.question} for r in judgeable],
+                "inputs": [r.question for r in judgeable],
                 "outputs": [r.generated_sql for r in judgeable],
                 "expectations": [
                     {"expected_sql": r.expected_sql} for r in judgeable
@@ -200,7 +203,7 @@ class EvaluationRunner:
             mlflow.log_param("num_test_cases", len(eval_results))
             mlflow.log_param("num_evaluated", len(judgeable))
 
-            judge_results = mlflow.genai.evaluate(
+            judge_results = mlflow.genai.evaluate(  # type: ignore[attr-defined]  # Databricks-only
                 data=eval_data,
                 scorers=[judge],
             )
@@ -212,13 +215,21 @@ class EvaluationRunner:
         # Merge verdicts back into eval_results
         if hasattr(judge_results, "tables") and "eval_results" in judge_results.tables:
             judge_df = judge_results.tables["eval_results"]
-            verdicts = judge_df["sql_semantic_correctness/value"].tolist()
-
-            judgeable_idx = 0
-            for r in eval_results:
-                if r.generated_sql and r.expected_sql:
-                    r.judge_correct = bool(verdicts[judgeable_idx])
-                    judgeable_idx += 1
+            col = "sql_semantic_correctness/value"
+            if col not in judge_df.columns:
+                logger.warning(
+                    "Judge results missing expected column %r; verdicts not applied. "
+                    "Available columns: %s",
+                    col,
+                    list(judge_df.columns),
+                )
+            else:
+                verdicts = judge_df[col].tolist()
+                judgeable_idx = 0
+                for r in eval_results:
+                    if r.generated_sql and r.expected_sql:
+                        r.judge_correct = bool(verdicts[judgeable_idx])
+                        judgeable_idx += 1
 
         return EvalSuiteResults(
             results=eval_results,

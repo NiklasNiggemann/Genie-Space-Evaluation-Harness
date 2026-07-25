@@ -74,7 +74,11 @@ class EvalSuiteResults:
 
     @property
     def accuracy(self) -> float:
-        """Fraction of test cases judged semantically correct."""
+        """Fraction of test cases judged semantically correct.
+
+        Cases where judge_correct is None (no SQL generated, or unjudged) count
+        as incorrect — a non-answer is treated the same as a wrong answer.
+        """
         if not self.results:
             return 0.0
         correct = sum(1 for r in self.results if r.judge_correct is True)
