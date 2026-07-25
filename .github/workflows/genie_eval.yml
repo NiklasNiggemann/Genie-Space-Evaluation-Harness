@@ -1,0 +1,49 @@
+name: Genie Agent Evaluation
+
+on:
+  pull_request:
+    paths:
+      - "genie-ontology/**"
+      - "genie-evaluation/test_suites/**"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install genie-eval
+        run: pip install ./genie-evaluation
+
+      - name: Run evaluation
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          GENIE_SPACE_ID: ${{ secrets.GENIE_SPACE_ID }}
+          MLFLOW_EXPERIMENT_NAME: /Shared/genie-eval-ci
+          # Optional: set ACCURACY_THRESHOLD to override the default 0.75
+          # Optional: set WAREHOUSE_ID to enable result-set scoring
+        run: python genie-evaluation/scripts/ci_eval.py
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('eval_summary.md')) return;
+            const body = fs.readFileSync('eval_summary.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

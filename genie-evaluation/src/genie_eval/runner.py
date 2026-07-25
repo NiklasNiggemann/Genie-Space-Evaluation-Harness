@@ -16,6 +16,7 @@ import mlflow
 import pandas as pd
 from databricks.sdk import WorkspaceClient
 
+from .analysis import compare_result_sets, execute_sql
 from .api import ask_genie, extract_result, extract_sql, extract_text_response
 from .judge import DEFAULT_JUDGE_MODEL, create_sql_judge
 from .models import EvalResult, EvalSuiteResults, TestCase
@@ -75,6 +76,7 @@ class EvaluationRunner:
         judge_model: str | None = None,
         accuracy_threshold: float = 0.75,
         max_workers: int = 1,
+        warehouse_id: str | None = None,
         verbose: bool = True,
     ):
         self.space_id = space_id
@@ -83,6 +85,7 @@ class EvaluationRunner:
         self.judge_model = judge_model
         self.accuracy_threshold = accuracy_threshold
         self.max_workers = max_workers
+        self.warehouse_id = warehouse_id
         self.verbose = verbose
 
     def run(
@@ -186,6 +189,18 @@ class EvaluationRunner:
                 conversation_id=result["conversation_id"],
                 message_id=result["message_id"],
             )
+
+            # Optionally compare actual result sets (requires warehouse_id)
+            if self.warehouse_id and record.generated_sql and record.expected_sql:
+                try:
+                    expected_rows = execute_sql(
+                        record.expected_sql,
+                        client=self.client,
+                        warehouse_id=self.warehouse_id,
+                    )
+                    record.result_set_correct = compare_result_sets(query_results, expected_rows)
+                except Exception as e:
+                    logger.debug("Result-set comparison failed for %r: %s", tc.question, e)
 
             if self.verbose:
                 if status == "COMPLETED" and generated_sql:

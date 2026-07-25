@@ -11,7 +11,7 @@ import pytest
 from genie_eval.models import EvalResult, EvalSuiteResults
 
 
-def _result(judge_correct=None, status="COMPLETED", generated_sql="SELECT 1", expected_sql="SELECT 1", category="c", difficulty="d"):
+def _result(judge_correct=None, status="COMPLETED", generated_sql="SELECT 1", expected_sql="SELECT 1", category="c", difficulty="d", result_set_correct=None):
     return EvalResult(
         question="q",
         category=category,
@@ -20,13 +20,14 @@ def _result(judge_correct=None, status="COMPLETED", generated_sql="SELECT 1", ex
         generated_sql=generated_sql,
         expected_sql=expected_sql,
         judge_correct=judge_correct,
+        result_set_correct=result_set_correct,
     )
 
 
-def _make_runner(space_id="space-1", max_workers=1):
+def _make_runner(space_id="space-1", max_workers=1, warehouse_id=None):
     from genie_eval.runner import EvaluationRunner
     with patch("genie_eval.runner.WorkspaceClient"):
-        return EvaluationRunner(space_id=space_id, verbose=False, max_workers=max_workers)
+        return EvaluationRunner(space_id=space_id, verbose=False, max_workers=max_workers, warehouse_id=warehouse_id)
 
 
 # ---- EvalSuiteResults.accuracy ------------------------------------------- #
@@ -60,6 +61,125 @@ class TestEvalSuiteResultsAccuracy:
         assert suite.completion_rate == pytest.approx(1 / 3)
 
 
+# ---- EvalSuiteResults reporting ------------------------------------------ #
+
+class TestReporting:
+    def _suite(self):
+        return EvalSuiteResults(results=[
+            _result(True,  category="aggregation", difficulty="easy"),
+            _result(False, category="aggregation", difficulty="hard"),
+            _result(True,  category="join",        difficulty="hard"),
+            _result(None,  category="join",        difficulty="easy", status="FAILED"),
+        ])
+
+    def test_report_returns_dataframe(self):
+        df = self._suite().report()
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 4
+        assert set(df.columns) >= {"question", "category", "difficulty", "status", "judge_correct"}
+
+    def test_report_includes_result_set_correct(self):
+        df = self._suite().report()
+        assert "result_set_correct" in df.columns
+
+    def test_summary_by_category_shape(self):
+        df = self._suite().summary_by_category()
+        assert set(df["category"]) == {"aggregation", "join"}
+        assert "accuracy" in df.columns
+        assert "completion_rate" in df.columns
+
+    def test_summary_by_category_accuracy(self):
+        df = self._suite().summary_by_category().set_index("category")
+        assert df.loc["aggregation", "accuracy"] == pytest.approx(0.5)
+        assert df.loc["join", "accuracy"] == pytest.approx(0.5)
+
+    def test_summary_by_difficulty_shape(self):
+        df = self._suite().summary_by_difficulty()
+        assert set(df["difficulty"]) == {"easy", "hard"}
+
+    def test_summary_by_difficulty_accuracy(self):
+        df = self._suite().summary_by_difficulty().set_index("difficulty")
+        # easy: 1 correct (aggregation/True), 1 unjudged (join/None) → 0.5
+        assert df.loc["easy", "accuracy"] == pytest.approx(0.5)
+        # hard: 1 correct (join/True), 1 wrong (aggregation/False) → 0.5
+        assert df.loc["hard", "accuracy"] == pytest.approx(0.5)
+
+
+# ---- Result-set scoring -------------------------------------------------- #
+
+class TestCompareResultSets:
+    def test_identical_rows_match(self):
+        from genie_eval.analysis import compare_result_sets
+        rows = [{"col": "a", "val": 1}, {"col": "b", "val": 2}]
+        assert compare_result_sets(rows, rows) is True
+
+    def test_different_row_order_matches(self):
+        from genie_eval.analysis import compare_result_sets
+        a = [{"v": 1}, {"v": 2}]
+        b = [{"v": 2}, {"v": 1}]
+        assert compare_result_sets(a, b) is True
+
+    def test_different_column_names_same_values_match(self):
+        from genie_eval.analysis import compare_result_sets
+        a = [{"total": 100}]
+        b = [{"revenue": 100}]
+        assert compare_result_sets(a, b) is True
+
+    def test_different_values_do_not_match(self):
+        from genie_eval.analysis import compare_result_sets
+        assert compare_result_sets([{"v": 1}], [{"v": 2}]) is False
+
+    def test_different_row_counts_do_not_match(self):
+        from genie_eval.analysis import compare_result_sets
+        assert compare_result_sets([{"v": 1}], [{"v": 1}, {"v": 2}]) is False
+
+    def test_empty_sets_match(self):
+        from genie_eval.analysis import compare_result_sets
+        assert compare_result_sets([], []) is True
+
+
+class TestResultSetScoringIntegration:
+    def test_result_set_correct_populated_when_warehouse_provided(self):
+        from genie_eval.models import TestCase
+
+        tc = TestCase(question="q", expected_sql="SELECT 1", category="c", difficulty="d")
+        runner = _make_runner(warehouse_id="wh-123")
+
+        fake_genie_result = {
+            "status": "COMPLETED",
+            "message": {"attachments": [{"query": {"query": "SELECT 1", "query_result": {"data": [{"v": 42}]}}}]},
+            "conversation_id": "c", "message_id": "m", "elapsed_seconds": 1.0,
+        }
+
+        with patch("genie_eval.runner.ask_genie", return_value=fake_genie_result), \
+             patch("genie_eval.runner.execute_sql", return_value=[{"v": 42}]) as mock_exec, \
+             patch("genie_eval.runner.compare_result_sets", return_value=True) as mock_cmp:
+            record = runner._evaluate_single(1, 1, tc)
+
+        mock_exec.assert_called_once()
+        mock_cmp.assert_called_once()
+        assert record.result_set_correct is True
+
+    def test_result_set_correct_skipped_when_no_warehouse(self):
+        from genie_eval.models import TestCase
+
+        tc = TestCase(question="q", expected_sql="SELECT 1", category="c", difficulty="d")
+        runner = _make_runner(warehouse_id=None)
+
+        fake_genie_result = {
+            "status": "COMPLETED",
+            "message": {"attachments": [{"query": {"query": "SELECT 1"}}]},
+            "conversation_id": "c", "message_id": "m", "elapsed_seconds": 1.0,
+        }
+
+        with patch("genie_eval.runner.ask_genie", return_value=fake_genie_result), \
+             patch("genie_eval.runner.execute_sql") as mock_exec:
+            record = runner._evaluate_single(1, 1, tc)
+
+        mock_exec.assert_not_called()
+        assert record.result_set_correct is None
+
+
 # ---- Filtering ------------------------------------------------------------ #
 
 class TestFiltering:
@@ -68,7 +188,6 @@ class TestFiltering:
         return TestCase(question=question, expected_sql="SELECT 1", category=category, difficulty=difficulty)
 
     def _run_filtered(self, runner, test_cases, **kwargs):
-        """Call runner.run with ask_genie mocked to return immediately."""
         fake_result = {
             "status": "COMPLETED",
             "message": {"attachments": []},
@@ -130,10 +249,7 @@ class TestParallelEval:
             for q in questions
         ]
 
-        call_order = []
-
         def fake_ask_genie(space_id, question, *, client, **kwargs):
-            call_order.append(question)
             return {
                 "status": "COMPLETED",
                 "message": {"attachments": [{"query": {"query": f"SELECT '{question}'"}}]},
@@ -148,8 +264,7 @@ class TestParallelEval:
             results = runner.run(test_cases)
 
         assert results.total == len(questions)
-        result_questions = [r.question for r in results.results]
-        assert result_questions == questions  # order preserved regardless of completion order
+        assert [r.question for r in results.results] == questions
 
 
 # ---- Verdict merge -------------------------------------------------------- #
@@ -208,66 +323,43 @@ class TestCompareRuns:
 
     def test_improvement(self):
         from genie_eval.analysis import compare_runs
-
         df_a = self._make_df([("What is revenue?", "agg", "easy", False)])
         df_b = self._make_df([("What is revenue?", "agg", "easy", True)])
-
         with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
-            result = compare_runs("run-a", "run-b")
-
-        assert result.iloc[0]["change"] == "improvement"
+            assert compare_runs("run-a", "run-b").iloc[0]["change"] == "improvement"
 
     def test_regression(self):
         from genie_eval.analysis import compare_runs
-
         df_a = self._make_df([("Count by product?", "agg", "easy", True)])
         df_b = self._make_df([("Count by product?", "agg", "easy", False)])
-
         with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
-            result = compare_runs("run-a", "run-b")
-
-        assert result.iloc[0]["change"] == "regression"
+            assert compare_runs("run-a", "run-b").iloc[0]["change"] == "regression"
 
     def test_stable_pass(self):
         from genie_eval.analysis import compare_runs
-
         df_a = self._make_df([("Revenue?", "agg", "easy", True)])
         df_b = self._make_df([("Revenue?", "agg", "easy", True)])
-
         with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
-            result = compare_runs("run-a", "run-b")
-
-        assert result.iloc[0]["change"] == "stable_pass"
+            assert compare_runs("run-a", "run-b").iloc[0]["change"] == "stable_pass"
 
     def test_stable_fail(self):
         from genie_eval.analysis import compare_runs
-
         df_a = self._make_df([("Revenue?", "agg", "easy", False)])
         df_b = self._make_df([("Revenue?", "agg", "easy", False)])
-
         with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
-            result = compare_runs("run-a", "run-b")
-
-        assert result.iloc[0]["change"] == "stable_fail"
+            assert compare_runs("run-a", "run-b").iloc[0]["change"] == "stable_fail"
 
     def test_not_judged_when_none(self):
         from genie_eval.analysis import compare_runs
-
         df_a = self._make_df([("Revenue?", "agg", "easy", None)])
         df_b = self._make_df([("Revenue?", "agg", "easy", True)])
-
         with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
-            result = compare_runs("run-a", "run-b")
-
-        assert result.iloc[0]["change"] == "not_judged"
+            assert compare_runs("run-a", "run-b").iloc[0]["change"] == "not_judged"
 
     def test_output_columns(self):
         from genie_eval.analysis import compare_runs
-
         df_a = self._make_df([("q?", "join", "hard", True)])
         df_b = self._make_df([("q?", "join", "hard", True)])
-
         with patch("mlflow.load_table", side_effect=self._mock_load_table(df_a, df_b)):
             result = compare_runs("run-a", "run-b")
-
         assert list(result.columns) == ["question", "category", "difficulty", "judge_correct_a", "judge_correct_b", "change"]

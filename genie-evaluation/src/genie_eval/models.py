@@ -34,7 +34,7 @@ class EvalResult:
     """The result of evaluating a single test case.
 
     Populated by the evaluation runner after asking Genie and (optionally)
-    running the LLM judge.
+    running the LLM judge and result-set comparison.
     """
 
     question: str
@@ -46,6 +46,7 @@ class EvalResult:
     text_response: str = ""
     result_preview: str = "[]"
     result_contains_expected: Optional[bool] = None
+    result_set_correct: Optional[bool] = None  # set when warehouse_id is provided
     execution_time_seconds: float = 0.0
     conversation_id: str = ""
     message_id: str = ""
@@ -57,7 +58,7 @@ class EvalSuiteResults:
     """Aggregate results for a complete evaluation run.
 
     Provides convenience properties for accuracy, completion rate,
-    and Delta table export.
+    and Delta table export, plus breakdown methods for failure analysis.
     """
 
     results: list[EvalResult] = field(default_factory=list)
@@ -91,6 +92,55 @@ class EvalSuiteResults:
             return 0.0
         return self.completed / len(self.results)
 
+    def report(self) -> "pd.DataFrame":
+        """Return a per-question breakdown as a DataFrame.
+
+        Columns: question, category, difficulty, status, judge_correct,
+                 result_set_correct, execution_time_s, generated_sql, expected_sql
+        """
+        import pandas as pd
+
+        return pd.DataFrame([
+            {
+                "question": r.question,
+                "category": r.category,
+                "difficulty": r.difficulty,
+                "status": r.status,
+                "judge_correct": r.judge_correct,
+                "result_set_correct": r.result_set_correct,
+                "execution_time_s": r.execution_time_seconds,
+                "generated_sql": r.generated_sql,
+                "expected_sql": r.expected_sql,
+            }
+            for r in self.results
+        ])
+
+    def summary_by_category(self) -> "pd.DataFrame":
+        """Accuracy and completion rate grouped by category."""
+        return self._grouped_summary("category")
+
+    def summary_by_difficulty(self) -> "pd.DataFrame":
+        """Accuracy and completion rate grouped by difficulty."""
+        return self._grouped_summary("difficulty")
+
+    def _grouped_summary(self, group_col: str) -> "pd.DataFrame":
+        import pandas as pd
+
+        df = self.report()
+        return (
+            df.groupby(group_col, sort=False)
+            .agg(
+                total=("question", "count"),
+                completed=("status", lambda s: (s == "COMPLETED").sum()),
+                correct=("judge_correct", lambda x: x.eq(True).sum()),
+            )
+            .assign(
+                accuracy=lambda d: d["correct"] / d["total"],
+                completion_rate=lambda d: d["completed"] / d["total"],
+            )
+            .reset_index()
+        )
+
     def to_delta(self, table_name: str) -> None:
         """Write results to a Delta table for historical tracking.
 
@@ -113,6 +163,7 @@ class EvalSuiteResults:
                 "generated_sql": r.generated_sql,
                 "expected_sql": r.expected_sql,
                 "judge_correct": r.judge_correct,
+                "result_set_correct": r.result_set_correct,
                 "execution_time_seconds": r.execution_time_seconds,
                 "space_id": self.space_id,
                 "run_id": self.run_id,

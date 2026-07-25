@@ -1,6 +1,6 @@
 # Genie Agent Evaluation Harness — Roadmap
 
-## Short-term (High value, low effort)
+## Short-term (High value, low effort) ✅
 
 ### 1. Parallel evaluation ✅
 Run Genie API calls concurrently via `ThreadPoolExecutor`. The API is I/O-bound;
@@ -32,22 +32,34 @@ print(df[df.change == "regression"])
 
 ---
 
-## Medium-term (Higher effort, high impact)
+## Medium-term (Higher effort, high impact) ✅
 
-### 4. Result-set scoring
-Execute both the generated SQL and expected SQL against Databricks and compare
-actual output rows. Catches cases where the LLM judge says "equivalent" but the
-data disagrees due to Genie catalog quirks or missing permissions.
+### 4. Result-set scoring ✅
+Execute the expected SQL directly against a Databricks SQL warehouse and compare
+actual output rows against what Genie returned. Catches cases where the LLM judge
+says "equivalent" but the data disagrees due to Genie catalog quirks or missing
+permissions. Opt-in via `warehouse_id`.
 
-### 5. CI/CD integration
-Wire the DAB job into a PR check: when `genie-ontology/` files change, automatically
-trigger an eval run and post the accuracy delta as a PR comment. Fail the check if
-accuracy regresses below threshold.
+```python
+runner = EvaluationRunner(space_id="...", warehouse_id="abc123")
+# result.result_set_correct is populated for each test case
+```
 
-### 6. Richer failure reporting
-After each run, auto-generate a breakdown table (by category, difficulty, and
-question) with the judge's full rationale, not just True/False. Surface this in the
-MLflow UI or as a notebook output cell.
+### 5. CI/CD integration ✅
+GitHub Actions workflow triggered on `genie-ontology/**` and `test_suites/**` PR
+changes. Runs the evaluation suite and posts accuracy delta as a PR comment.
+Fails the check if accuracy drops below threshold.
+
+See `.github/workflows/genie_eval.yml` and `genie-evaluation/scripts/ci_eval.py`.
+
+### 6. Richer failure reporting ✅
+`EvalSuiteResults` now exposes structured breakdown methods for post-run analysis:
+
+```python
+results.report()                # per-question DataFrame
+results.summary_by_category()  # accuracy + completion rate per category
+results.summary_by_difficulty() # accuracy + completion rate per difficulty
+```
 
 ---
 
