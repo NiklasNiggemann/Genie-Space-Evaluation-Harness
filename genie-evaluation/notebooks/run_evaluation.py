@@ -10,12 +10,13 @@
 
 # Update this path to wherever the package lives in your workspace
 # MAGIC %pip install /Workspace/Users/niklas.niggemann@codecentric.de/genie-eval/genie_eval-0.1.0-py3-none-any.whl -q
+# MAGIC %pip install "mlflow>=3.0" -q
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
 
-from genie_eval import EvaluationRunner, load_test_suite
 from databricks.sdk.runtime import dbutils
+from genie_eval import EvaluationRunner, load_test_suite
 
 # Job parameters — set defaults here, override via Lakeflow job parameters
 dbutils.widgets.text("space_id",           "01f16364ce181c628265e3815d9214cc")

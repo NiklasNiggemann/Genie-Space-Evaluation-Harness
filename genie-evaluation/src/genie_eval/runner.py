@@ -236,7 +236,7 @@ class EvaluationRunner:
         eval_data = pd.DataFrame(
             {
                 "inputs": [{"question": r.question} for r in judgeable],
-                "outputs": [r.generated_sql for r in judgeable],
+                "outputs": [{"generated_sql": r.generated_sql} for r in judgeable],
                 "expectations": [{"expected_sql": r.expected_sql} for r in judgeable],
             }
         )

@@ -33,7 +33,7 @@ class TestJudgePrompt:
 
     def test_prompt_references_template_variables(self):
         """The prompt must contain the MLflow template vars."""
-        assert "{{ outputs }}" in SQL_JUDGE_INSTRUCTIONS
+        assert "{{ outputs.generated_sql }}" in SQL_JUDGE_INSTRUCTIONS
         assert "{{ expectations }}" in SQL_JUDGE_INSTRUCTIONS
         assert "{{ inputs.question }}" in SQL_JUDGE_INSTRUCTIONS
 
