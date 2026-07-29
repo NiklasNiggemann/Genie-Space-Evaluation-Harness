@@ -20,15 +20,35 @@ assert results.accuracy >= 0.75, "Quality gate failed"
 ## Installation
 
 ```bash
-# Development
+# Development (local unit tests, no Databricks needed)
 cd genie-evaluation
 pip install -e ".[dev]"
 
-# From workspace path (on Databricks)
-%pip install /Workspace/path/to/genie-evaluation
-
-# From Git
+# From Git (e.g. in a Databricks notebook)
 pip install git+https://github.com/NiklasNiggemann/Genie-Space-Evaluation-Harness.git#subdirectory=genie-evaluation
+```
+
+### Library-first architecture
+
+All business logic lives in the `genie_eval` Python library (`src/genie_eval/`). The Databricks notebook (`notebooks/run_evaluation.py`) is intentionally thin — it only sets parameters and calls the library. This separation means:
+
+- **Unit tests run locally** via `pytest` without touching Databricks
+- **The library is versioned** as a wheel; each deployment is a known, immutable artifact
+- **The notebook is readable** as a config file, not an implementation
+
+To deploy a new version to Databricks, build the wheel and upload it to the workspace:
+
+```bash
+pip wheel genie-evaluation/ -w /tmp/dist/ --no-deps
+databricks workspace mkdirs /Workspace/Users/<you>/genie-eval
+databricks workspace import /Workspace/Users/<you>/genie-eval/genie_eval-0.1.0-py3-none-any.whl \
+  --file /tmp/dist/genie_eval-0.1.0-py3-none-any.whl --format RAW --overwrite
+```
+
+The notebook's first cell installs the wheel:
+
+```python
+%pip install /Workspace/Users/<you>/genie-eval/genie_eval-0.1.0-py3-none-any.whl -q
 ```
 
 ## Project Structure
@@ -84,7 +104,7 @@ results = runner.run(suite, difficulties=["hard"])
 |---|---|---|
 | `space_id` | required | Genie Agent ID (from the URL) |
 | `experiment_name` | `None` | MLflow experiment path |
-| `judge_model` | `databricks:/databricks-claude-sonnet-4` | LLM endpoint for the judge |
+| `judge_model` | `databricks:/databricks-claude-sonnet-4-6` | LLM endpoint for the judge |
 | `accuracy_threshold` | `0.75` | Minimum accuracy before the job fails |
 | `max_workers` | `1` | Parallel Genie API workers |
 | `warehouse_id` | `None` | SQL warehouse for result-set scoring |
@@ -220,18 +240,20 @@ pytest
 
 ## Deployment (DAB)
 
+The scheduled nightly job is managed via a Databricks Asset Bundle (`genie-evaluation/databricks.yml`). Deploy it with the CLI:
+
 ```bash
-# Deploy to dev
+# Deploy job config to dev
 databricks bundle deploy --target dev
 
-# Run the job immediately
+# Trigger a one-off run immediately
 databricks bundle run genie_eval_nightly --target dev
 
 # Deploy to prod
 databricks bundle deploy --target prod
 ```
 
-The nightly job is configured in `genie-evaluation/databricks.yml` and runs the full suite on a schedule, sending failure notifications by email.
+> **Note:** Deploy the wheel to the workspace first (see Installation above) before running the job, so the notebook's `%pip install` can resolve it.
 
 ---
 

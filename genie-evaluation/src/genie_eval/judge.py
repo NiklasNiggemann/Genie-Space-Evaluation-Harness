@@ -35,7 +35,7 @@ Rate False if they would produce meaningfully different results.
 """
 
 # Default model endpoint for the judge LLM
-DEFAULT_JUDGE_MODEL = "databricks:/databricks-claude-sonnet-4"
+DEFAULT_JUDGE_MODEL = "databricks:/databricks-claude-sonnet-4-6"
 
 
 def create_sql_judge(
