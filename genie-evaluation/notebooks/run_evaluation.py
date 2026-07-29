@@ -8,14 +8,33 @@
 
 # COMMAND ----------
 
-# Update this path to wherever the package lives in your workspace
-# MAGIC %pip install /Workspace/Users/niklas.niggemann@codecentric.de/genie-eval/genie_eval-0.1.0-py3-none-any.whl -q
 # MAGIC %pip install "mlflow>=3.0" -q
 # MAGIC dbutils.library.restartPython()
 
 # COMMAND ----------
 
+import subprocess
 from databricks.sdk.runtime import dbutils
+
+# install_mode widget: "wheel" = pinned production build, "git" = latest main (dev iteration)
+dbutils.widgets.dropdown("install_mode", "wheel", ["wheel", "git"])
+INSTALL_MODE = dbutils.widgets.get("install_mode")
+
+if INSTALL_MODE == "git":
+    subprocess.run([
+        "pip", "install", "-q", "--upgrade",
+        "git+https://github.com/NiklasNiggemann/Genie-Space-Evaluation-Harness.git#subdirectory=genie-evaluation",
+    ], check=True)
+    print("✅ Installed genie_eval from git (latest main)")
+else:
+    subprocess.run([
+        "pip", "install", "-q",
+        "/Workspace/Users/niklas.niggemann@codecentric.de/genie-eval/genie_eval-0.1.0-py3-none-any.whl",
+    ], check=True)
+    print("✅ Installed genie_eval from wheel (pinned)")
+
+# COMMAND ----------
+
 from genie_eval import EvaluationRunner, load_test_suite
 
 # Job parameters — set defaults here, override via Lakeflow job parameters
