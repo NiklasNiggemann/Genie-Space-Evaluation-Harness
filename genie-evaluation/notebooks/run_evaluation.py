@@ -16,11 +16,20 @@
 import subprocess
 from databricks.sdk.runtime import dbutils
 
-# install_mode widget: "wheel" = pinned production build, "git" = latest main (dev iteration)
-dbutils.widgets.dropdown("install_mode", "wheel", ["wheel", "git"])
+# install_mode widget:
+#   local = install from this Git Folder (no roundtrip, always in sync)
+#   git   = install from GitHub main (useful outside Git Folders)
+#   wheel = install pinned production wheel
+dbutils.widgets.dropdown("install_mode", "local", ["local", "git", "wheel"])
 INSTALL_MODE = dbutils.widgets.get("install_mode")
 
-if INSTALL_MODE == "git":
+if INSTALL_MODE == "local":
+    subprocess.run([
+        "pip", "install", "-q",
+        "/Workspace/Users/niklas.niggemann@codecentric.de/Genie-Space-Evaluation-Harness/genie-evaluation/",
+    ], check=True)
+    print("✅ Installed genie_eval from local workspace (Git Folder)")
+elif INSTALL_MODE == "git":
     subprocess.run([
         "pip", "install", "-q", "--upgrade",
         "git+https://github.com/NiklasNiggemann/Genie-Space-Evaluation-Harness.git#subdirectory=genie-evaluation",
