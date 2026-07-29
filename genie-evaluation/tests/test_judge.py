@@ -35,7 +35,7 @@ class TestJudgePrompt:
         """The prompt must contain the MLflow template vars."""
         assert "{{ outputs }}" in SQL_JUDGE_INSTRUCTIONS
         assert "{{ expectations }}" in SQL_JUDGE_INSTRUCTIONS
-        assert "{{ inputs }}" in SQL_JUDGE_INSTRUCTIONS
+        assert "{{ inputs.question }}" in SQL_JUDGE_INSTRUCTIONS
 
     def test_prompt_lists_acceptable_differences(self):
         assert "column aliases" in SQL_JUDGE_INSTRUCTIONS

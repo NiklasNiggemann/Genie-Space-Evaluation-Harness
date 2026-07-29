@@ -28,7 +28,7 @@ Must match (rate False if different):
 - Different tables, different aggregation functions (SUM vs COUNT),
   missing/extra filter conditions, different GROUP BY columns, different LIMIT values
 
-The original question asked was: {{ inputs }}
+The original question asked was: {{ inputs.question }}
 
 Rate True if the generated SQL would produce equivalent results to the expected SQL.
 Rate False if they would produce meaningfully different results.
