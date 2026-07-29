@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "1"
+# ///
 # MAGIC %md
 # MAGIC # Genie Agent Evaluation — Production Runner
 # MAGIC
@@ -44,7 +48,12 @@ else:
 
 # COMMAND ----------
 
+# DBTITLE 1,Cell 4
+import os
 from genie_eval import EvaluationRunner, load_test_suite
+
+# Ensure CWD is the project root so relative paths in widgets resolve correctly
+os.chdir("/Workspace/Users/niklas.niggemann@codecentric.de/Genie-Space-Evaluation-Harness/genie-evaluation")
 
 # Job parameters — set defaults here, override via Lakeflow job parameters
 dbutils.widgets.text("space_id",           "01f16364ce181c628265e3815d9214cc")
@@ -76,7 +85,9 @@ runner = EvaluationRunner(
 )
 
 # COMMAND ----------
-# MAGIC %md ### 1 — Golden suite (strict gate)
+
+# DBTITLE 1,Golden suite (strict gate)
+# 1 — Golden suite (strict gate)
 
 golden_suite = load_test_suite(GOLDEN_SUITE_PATH)
 golden_results = runner.run(golden_suite)
@@ -88,7 +99,9 @@ assert golden_results.accuracy >= 1.0, (
 print(f"✅ Golden suite: {golden_results.accuracy:.0%} ({golden_results.total} questions)")
 
 # COMMAND ----------
-# MAGIC %md ### 2 — Full suite (quality gate)
+
+# DBTITLE 1,Full suite (quality gate)
+# 2 — Full suite (quality gate)
 
 full_suite = load_test_suite(TEST_SUITE_PATH)
 results = runner.run(full_suite)

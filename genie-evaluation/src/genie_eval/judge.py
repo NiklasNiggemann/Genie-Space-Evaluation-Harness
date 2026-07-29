@@ -12,7 +12,7 @@ from __future__ import annotations
 
 SQL_JUDGE_INSTRUCTIONS = """
 You are an expert SQL evaluator for Databricks SQL. Determine whether the
-generated SQL in {{ outputs.generated_sql }} is semantically equivalent to the expected SQL
+generated SQL in {{ outputs }} is semantically equivalent to the expected SQL
 in {{ expectations }} — meaning they would produce the same result set.
 
 Two SQL statements are semantically equivalent if they:
@@ -28,7 +28,7 @@ Must match (rate False if different):
 - Different tables, different aggregation functions (SUM vs COUNT),
   missing/extra filter conditions, different GROUP BY columns, different LIMIT values
 
-The original question asked was: {{ inputs.question }}
+The original question asked was: {{ inputs }}
 
 Rate True if the generated SQL would produce equivalent results to the expected SQL.
 Rate False if they would produce meaningfully different results.
